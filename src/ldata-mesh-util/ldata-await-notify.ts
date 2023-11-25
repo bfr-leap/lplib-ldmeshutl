@@ -21,7 +21,10 @@ async function run(
             console.log(
                 `Data Update for ${entry.dataset_id} on ${entry.timestamp}`
             );
-            if (entry.timestamp > outputDate) {
+            if (
+                entry.dataset_id === `${clientName}:exrq` ||
+                entry.timestamp > outputDate
+            ) {
                 if (timer) {
                     console.log(`Clearing old timer`);
                     clearTimeout(timer);
