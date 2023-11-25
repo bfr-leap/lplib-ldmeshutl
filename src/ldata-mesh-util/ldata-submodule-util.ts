@@ -41,7 +41,7 @@ export function getModifiedRootFolders(datasetName: string) {
 
         return Array.from(rootFolders);
     } catch (error) {
-        console.error('Error fetching modified folders:', error);
+        console.error('Error fetching modified folders for:', datasetName);
         console.log('Returning empty modifications list');
         return [];
     }
