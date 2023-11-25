@@ -1,21 +1,25 @@
 import * as fs from 'fs';
 
 export function getModifiedDate(datasetName: string): number {
-    let dateStr: string = fs
-        .readFileSync(`./${datasetName}-date.log`, 'utf-8')
-        .split('\n')[0]
-        .split('\t')[0];
+    try {
+        let dateStr: string = fs
+            .readFileSync(`./${datasetName}-date.log`, 'utf-8')
+            .split('\n')[0]
+            .split('\t')[0];
 
-    let ret: number = 0;
+        let ret: number = 0;
 
-    if (dateStr) {
-        ret = Number.parseInt(dateStr, 0);
-        if (isNaN(ret)) {
-            ret = 0;
+        if (dateStr) {
+            ret = Number.parseInt(dateStr, 0);
+            if (isNaN(ret)) {
+                ret = 0;
+            }
         }
-    }
 
-    return ret;
+        return ret;
+    } catch (error) {
+        return -1;
+    }
 }
 
 export function getModifiedRootFolders(datasetName: string) {

@@ -66,6 +66,7 @@ export class LdataUpdateLogClient {
     ) {
         this._clientName = clientName;
         this._sourceNames = JSON.parse(JSON.stringify(sourceNames));
+        this._sourceNames.push(`${clientName}:exrq`);
         this._callback = callback;
     }
 
@@ -76,7 +77,7 @@ export class LdataUpdateLogClient {
         try {
             msg = JSON.parse(message?.value?.toString() || '{}');
         } catch (e) {
-            console.log(`Error parsing incomming kafka message: ${e}`);
+            console.log(`Error parsing incoming kafka message: ${e}`);
             return;
         }
 
