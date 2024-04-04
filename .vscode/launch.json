@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "test-client (Debug)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run-script",
+                "test-client"
+            ],
+            "port": 9229,
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "openOnSessionStart"
+        }
+    ]
+}
