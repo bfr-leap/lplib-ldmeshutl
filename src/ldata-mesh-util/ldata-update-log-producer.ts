@@ -1,5 +1,4 @@
 import { Kafka } from 'kafkajs';
-import * as fs from 'fs';
 import {
     getModifiedDate,
     getModifiedRootFolders,

@@ -1,3 +1,4 @@
+import { sendNotification } from './ldata-update-log-producer';
 import {
     LdataUpdateLogClient,
     LdataUpdateLogEntry,
@@ -42,6 +43,7 @@ async function run(
     console.log(`${targetDataset} last modified: ${outputDate}`);
     console.log(`Waiting for ${dependencyDatasets} to be updated...`);
     await client.run();
+    await sendNotification(`${clientName}:exst`, clientName);
 }
 
 export function popcornAwait(
@@ -51,3 +53,4 @@ export function popcornAwait(
 ) {
     run(clientName, targetDataset, dependencyDatasets).catch(console.error);
 }
+
