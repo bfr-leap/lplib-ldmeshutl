@@ -35,6 +35,8 @@ async function run(
                 timer = setTimeout(() => {
                     console.log(`Ready to update ${targetDataset}`);
                     client.stop();
+
+                    sendNotification(`${clientName}:exst`, clientName);
                 }, interval);
             }
         }
@@ -43,7 +45,6 @@ async function run(
     console.log(`${targetDataset} last modified: ${outputDate}`);
     console.log(`Waiting for ${dependencyDatasets} to be updated...`);
     await client.run();
-    await sendNotification(`${clientName}:exst`, clientName);
 }
 
 export function popcornAwait(
