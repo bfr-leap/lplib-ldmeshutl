@@ -14,6 +14,7 @@ async function run(
     const interval = 1000 * 5;
 
     let outputDate = getModifiedDate(targetDataset);
+    let done = false;
 
     const client = new LdataUpdateLogClient(
         clientName,
@@ -37,6 +38,7 @@ async function run(
                     client.stop();
 
                     sendNotification(`${clientName}:exst`, clientName);
+                    done = true;
                 }, interval);
             }
         }
@@ -45,6 +47,14 @@ async function run(
     console.log(`${targetDataset} last modified: ${outputDate}`);
     console.log(`Waiting for ${dependencyDatasets} to be updated...`);
     await client.run();
+
+    while (!done) {
+        await delay(1000);
+    }
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function popcornAwait(
@@ -53,5 +63,13 @@ export function popcornAwait(
     dependencyDatasets: string[]
 ) {
     run(clientName, targetDataset, dependencyDatasets).catch(console.error);
+}
+
+export async function popcornAwaitAsync(
+    clientName: string,
+    targetDataset: string,
+    dependencyDatasets: string[]
+) {
+    await run(clientName, targetDataset, dependencyDatasets);
 }
 
