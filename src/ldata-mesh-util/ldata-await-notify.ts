@@ -4,6 +4,11 @@ import {
     LdataUpdateLogEntry,
 } from './ldata-update-log-client';
 import { getModifiedDate } from './ldata-submodule-util';
+import { loadScheduleTimes, getNextScheduledTime } from './schedule-file';
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function run(
     clientName: string,
@@ -16,6 +21,31 @@ async function run(
     let outputDate = getModifiedDate(targetDataset);
     let done = false;
 
+    // Load schedule times.  If the file exists, the loop can also unblock
+    // when the nearest future timestamp is reached – even without a
+    // dependency message.
+    const scheduleTimes = loadScheduleTimes();
+    const nextTime = getNextScheduledTime(scheduleTimes);
+
+    if (nextTime !== null) {
+        const msUntil = nextTime - Date.now();
+        console.log(
+            `[${clientName}] Next scheduled time: ${new Date(
+                nextTime
+            ).toISOString()} (${msUntil}ms from now)`
+        );
+
+        // Set a timer that fires at the scheduled time.
+        // If a dependency message arrives first the timer is cleared.
+        const scheduleMs = Math.max(msUntil, 0);
+        timer = setTimeout(() => {
+            console.log(`[${clientName}] Scheduled time reached – unblocking`);
+            client.stop();
+            sendNotification(`${clientName}:exst`, clientName);
+            done = true;
+        }, scheduleMs);
+    }
+
     const client = new LdataUpdateLogClient(
         clientName,
         dependencyDatasets,
@@ -27,6 +57,7 @@ async function run(
                 entry.dataset_id === `${clientName}:exrq` ||
                 entry.timestamp > outputDate
             ) {
+                // Cancel a pending schedule timer – dependency wins.
                 if (timer) {
                     console.log(`Clearing old timer`);
                     clearTimeout(timer);
@@ -49,12 +80,8 @@ async function run(
     await client.run();
 
     while (!done) {
-        await delay(1000);
+        await sleep(1000);
     }
-}
-
-function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function popcornAwait(
@@ -72,4 +99,3 @@ export async function popcornAwaitAsync(
 ) {
     await run(clientName, targetDataset, dependencyDatasets);
 }
-

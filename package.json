@@ -9,6 +9,8 @@
     ],
     "scripts": {
         "test-client": "ts-node tests/client.ts",
+        "test-schedule": "ts-node tests/schedule-file.test.ts",
+        "test": "ts-node tests/schedule-file.test.ts",
         "prettier-check": "npx prettier --check .",
         "prettier": "npx prettier --write ."
     },
