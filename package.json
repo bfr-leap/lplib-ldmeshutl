@@ -9,10 +9,8 @@
     ],
     "scripts": {
         "test-client": "ts-node tests/client.ts",
-        "test-readiness": "ts-node tests/readiness.test.ts",
-        "test-delay-config": "ts-node tests/delay-config.test.ts",
-        "test-await-loop": "ts-node tests/await-loop.test.ts",
-        "test": "ts-node tests/readiness.test.ts && ts-node tests/delay-config.test.ts && ts-node tests/await-loop.test.ts",
+        "test-schedule": "ts-node tests/schedule-file.test.ts",
+        "test": "ts-node tests/schedule-file.test.ts",
         "prettier-check": "npx prettier --check .",
         "prettier": "npx prettier --write ."
     },
