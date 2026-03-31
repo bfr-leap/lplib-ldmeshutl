@@ -1,10 +1,7 @@
 export {
     popcornAwait,
     popcornAwaitAsync,
-    popcornAwaitTimed,
-    popcornAwaitTimedAsync,
 } from './ldata-mesh-util/ldata-await-notify';
-export type { AwaitOptions } from './ldata-mesh-util/ldata-await-notify';
 
 export {
     evaluateReadiness,
@@ -18,6 +15,7 @@ export type {
 } from './ldata-mesh-util/readiness';
 
 export {
+    loadScheduleFile,
     parseDelay,
     resolveDelay,
     computeEarliestRunTime,

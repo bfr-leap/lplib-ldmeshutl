@@ -3,7 +3,13 @@
  *
  * Allows content types to declare a delay before becoming eligible to run,
  * with optional per-league overrides.
+ *
+ * The schedule is loaded from a `content-schedule.json` file in the working
+ * directory.  When the file is absent, all lookups resolve to zero delay
+ * (immediate execution), preserving backward-compatible behavior.
  */
+
+import * as fs from 'fs';
 
 export interface ContentSchedule {
     /** Delay string, e.g. "0d", "1d", "2d", "7d". */
@@ -11,11 +17,36 @@ export interface ContentSchedule {
 }
 
 export interface DelayConfig {
+    /** Optional league identifier for this deployment. */
+    league?: string;
+
     /** Default schedules keyed by content type name. */
     contentSchedules: Record<string, ContentSchedule>;
 
     /** Per-league overrides keyed by league ID, then content type. */
     leagueOverrides?: Record<string, Record<string, ContentSchedule>>;
+}
+
+const SCHEDULE_FILE = './content-schedule.json';
+
+/**
+ * Load the schedule file from the working directory.
+ * Returns `null` when the file does not exist or cannot be parsed,
+ * so callers fall back to immediate execution.
+ */
+export function loadScheduleFile(
+    path: string = SCHEDULE_FILE
+): DelayConfig | null {
+    try {
+        const raw = fs.readFileSync(path, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.contentSchedules) {
+            return parsed as DelayConfig;
+        }
+        return null;
+    } catch {
+        return null;
+    }
 }
 
 const DELAY_PATTERN = /^(\d+)(ms|s|m|h|d)$/;

@@ -1,8 +1,11 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
     parseDelay,
     resolveDelay,
     computeEarliestRunTime,
+    loadScheduleFile,
     DelayConfig,
 } from '../src/ldata-mesh-util/delay-config';
 
@@ -178,6 +181,102 @@ test('computeEarliestRunTime: missing config fallback -> null', () => {
     const result = computeEarliestRunTime(1_000_000, testConfig, 'nonexistent');
     assert.strictEqual(result, null);
 });
+
+// --- loadScheduleFile ---
+
+const tmpDir = path.join(__dirname, '.tmp-test-schedules');
+
+function withTmpSchedule(data: any, fn: (filePath: string) => void): void {
+    if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    const filePath = path.join(tmpDir, `schedule-${Date.now()}.json`);
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(data));
+        fn(filePath);
+    } finally {
+        try {
+            fs.unlinkSync(filePath);
+        } catch {}
+    }
+}
+
+test('loadScheduleFile: valid file returns DelayConfig', () => {
+    withTmpSchedule(
+        {
+            contentSchedules: {
+                race_summary: { delay: '0d' },
+                driver_of_the_day: { delay: '2d' },
+            },
+        },
+        (filePath) => {
+            const config = loadScheduleFile(filePath);
+            assert.ok(config !== null);
+            assert.strictEqual(
+                config!.contentSchedules['driver_of_the_day'].delay,
+                '2d'
+            );
+        }
+    );
+});
+
+test('loadScheduleFile: file with league field', () => {
+    withTmpSchedule(
+        {
+            league: 'league_a',
+            contentSchedules: {
+                driver_of_the_day: { delay: '2d' },
+            },
+            leagueOverrides: {
+                league_a: {
+                    driver_of_the_day: { delay: '1d' },
+                },
+            },
+        },
+        (filePath) => {
+            const config = loadScheduleFile(filePath);
+            assert.ok(config !== null);
+            assert.strictEqual(config!.league, 'league_a');
+            assert.strictEqual(
+                resolveDelay(config!, 'driver_of_the_day', config!.league),
+                86_400_000
+            ); // 1d override
+        }
+    );
+});
+
+test('loadScheduleFile: missing file returns null', () => {
+    const config = loadScheduleFile('/nonexistent/path/schedule.json');
+    assert.strictEqual(config, null);
+});
+
+test('loadScheduleFile: invalid JSON returns null', () => {
+    if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    const filePath = path.join(tmpDir, `bad-${Date.now()}.json`);
+    try {
+        fs.writeFileSync(filePath, '{ not valid json !!!');
+        const config = loadScheduleFile(filePath);
+        assert.strictEqual(config, null);
+    } finally {
+        try {
+            fs.unlinkSync(filePath);
+        } catch {}
+    }
+});
+
+test('loadScheduleFile: JSON without contentSchedules returns null', () => {
+    withTmpSchedule({ foo: 'bar' }, (filePath) => {
+        const config = loadScheduleFile(filePath);
+        assert.strictEqual(config, null);
+    });
+});
+
+// Cleanup tmp dir
+try {
+    fs.rmdirSync(tmpDir);
+} catch {}
 
 // --- Summary ---
 console.log(`\n${passed} passed, ${failed} failed\n`);

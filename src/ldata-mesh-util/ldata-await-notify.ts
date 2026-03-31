@@ -9,29 +9,9 @@ import {
     ReadinessState,
     evaluateReadiness,
     buildLegacyCondition,
+    buildTimedCondition,
 } from './readiness';
-
-/** Options for the generalized await loop. */
-export interface AwaitOptions {
-    /**
-     * Readiness condition. When omitted the loop falls back to legacy
-     * behavior (dependency-only, no time gate).
-     */
-    condition?: ReadinessCondition;
-
-    /**
-     * Debounce interval in ms applied after the last dependency message
-     * before declaring dependencies satisfied.  Defaults to 5 000 ms.
-     */
-    debounceMs?: number;
-
-    /**
-     * Maximum time in ms to sleep between readiness re-evaluations when
-     * waiting for a time condition.  Keeps the loop from busy-polling while
-     * still waking reasonably close to the target time.  Defaults to 30 000 ms.
-     */
-    maxPollIntervalMs?: number;
-}
+import { loadScheduleFile, computeEarliestRunTime } from './delay-config';
 
 type WakeReason = 'kafka_event' | 'debounce_timeout' | 'time_wait' | 'startup';
 
@@ -80,33 +60,43 @@ function logReadiness(
 }
 
 // ---------------------------------------------------------------------------
-// Core loop – supports both dependency-only and dependency+time readiness
+// Core loop
 // ---------------------------------------------------------------------------
+
+const DEBOUNCE_MS = 5_000;
+const MAX_POLL_INTERVAL_MS = 30_000;
 
 async function run(
     clientName: string,
     targetDataset: string,
-    dependencyDatasets: string[],
-    options: AwaitOptions = {}
+    dependencyDatasets: string[]
 ) {
-    const debounceMs = options.debounceMs ?? 5_000;
-    const maxPollIntervalMs = options.maxPollIntervalMs ?? 30_000;
-
-    // Build condition: either caller-supplied or legacy dependency-only.
-    const condition: ReadinessCondition =
-        options.condition ?? buildLegacyCondition(dependencyDatasets);
+    // Try to load a schedule file.  If it exists and has an entry for this
+    // clientName, build a timed readiness condition.  Otherwise fall back to
+    // the legacy dependency-only condition (zero integration cost for repos
+    // that don't use delayed scheduling).
+    const schedule = loadScheduleFile();
 
     const outputDate = getModifiedDate(targetDataset);
 
     // Mutable state --------------------------------------------------------
     const satisfiedContexts = new Set<string>();
     let debounceTimer: NodeJS.Timeout | null = null;
-    let dependencyDebounceSettled = false; // true once debounce fires
+    let dependencyDebounceSettled = false;
     let done = false;
+
+    // We track the latest dependency timestamp so we can compute
+    // earliest_run_time once the debounce settles.
+    let latestDependencyTimestamp = 0;
+
+    // The readiness condition starts as dependency-only.  Once the debounce
+    // settles we may upgrade it to include a time gate (if the schedule file
+    // dictates a delay for this clientName).
+    let condition: ReadinessCondition =
+        buildLegacyCondition(dependencyDatasets);
 
     // Helpers --------------------------------------------------------------
 
-    /** Evaluate and optionally finish. Returns true when ready. */
     function tryFinish(reason: WakeReason): boolean {
         const state: ReadinessState = {
             satisfiedContexts,
@@ -144,30 +134,53 @@ async function run(
             const isExplicitRequest = entry.dataset_id === `${clientName}:exrq`;
 
             if (isExplicitRequest || entry.timestamp > outputDate) {
-                // Mark this dependency as satisfied.
                 satisfiedContexts.add(entry.dataset_id);
 
-                // Reset debounce timer – we wait for a quiet period before
-                // considering dependencies settled.
+                if (entry.timestamp > latestDependencyTimestamp) {
+                    latestDependencyTimestamp = entry.timestamp;
+                }
+
                 if (debounceTimer) {
                     console.log(`[${clientName}] Clearing debounce timer`);
                     clearTimeout(debounceTimer);
                 }
 
                 console.log(
-                    `[${clientName}] Starting debounce timer ${debounceMs}ms`
+                    `[${clientName}] Starting debounce timer ${DEBOUNCE_MS}ms`
                 );
                 debounceTimer = setTimeout(() => {
                     dependencyDebounceSettled = true;
 
-                    // If time condition is already met we can finish right
-                    // inside the debounce callback (fast path).
+                    // Now that dependencies have settled, compute the time
+                    // gate from the schedule file (if applicable).
+                    if (schedule) {
+                        const leagueId = schedule.league ?? null;
+                        const earliest = computeEarliestRunTime(
+                            latestDependencyTimestamp,
+                            schedule,
+                            clientName,
+                            leagueId
+                        );
+                        if (earliest !== null) {
+                            condition = buildTimedCondition(
+                                dependencyDatasets,
+                                earliest
+                            );
+                            console.log(
+                                `[${clientName}] Schedule file applied: earliest_run_time=${new Date(
+                                    earliest
+                                ).toISOString()}`
+                            );
+                        }
+                    }
+
+                    // Fast path: if time condition is already met, finish now.
                     if (tryFinish('debounce_timeout')) {
                         client.stop();
                         sendNotification(`${clientName}:exst`, clientName);
                         done = true;
                     }
-                }, debounceMs);
+                }, DEBOUNCE_MS);
             }
         }
     );
@@ -178,21 +191,16 @@ async function run(
     console.log(
         `[${clientName}] Waiting for dependencies [${dependencyDatasets}]...`
     );
-    if (condition.earliestRunTime !== null) {
+    if (schedule) {
         console.log(
-            `[${clientName}] Earliest run time: ${new Date(
-                condition.earliestRunTime
-            ).toISOString()}`
+            `[${clientName}] Schedule file loaded; delay will be evaluated after dependencies settle`
         );
     }
 
-    // Start consuming Kafka messages (non-blocking after setup).
     await client.run();
 
-    // Main wait loop – wakes on debounce settling or time boundary ---------
+    // Main wait loop -------------------------------------------------------
     while (!done) {
-        // If dependencies have debounce-settled but time hasn't arrived yet,
-        // sleep until the time boundary (bounded by maxPollIntervalMs).
         if (dependencyDebounceSettled && !done) {
             const state: ReadinessState = {
                 satisfiedContexts,
@@ -218,31 +226,26 @@ async function run(
                 break;
             }
 
-            // Sleep until the next meaningful wake time.
             const sleepMs = Math.min(
                 result.msUntilTimeCondition > 0
                     ? result.msUntilTimeCondition
-                    : maxPollIntervalMs,
-                maxPollIntervalMs
+                    : MAX_POLL_INTERVAL_MS,
+                MAX_POLL_INTERVAL_MS
             );
             console.log(
                 `[${clientName}] Time condition not met; sleeping ${sleepMs}ms`
             );
             await sleep(sleepMs);
         } else {
-            // Dependencies not yet settled – light polling.
             await sleep(1_000);
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Public API – backward-compatible signatures
+// Public API – signatures unchanged from original
 // ---------------------------------------------------------------------------
 
-/**
- * Legacy fire-and-forget await (dependency-only, no time gate).
- */
 export function popcornAwait(
     clientName: string,
     targetDataset: string,
@@ -251,40 +254,10 @@ export function popcornAwait(
     run(clientName, targetDataset, dependencyDatasets).catch(console.error);
 }
 
-/**
- * Legacy async await (dependency-only, no time gate).
- */
 export async function popcornAwaitAsync(
     clientName: string,
     targetDataset: string,
     dependencyDatasets: string[]
 ) {
     await run(clientName, targetDataset, dependencyDatasets);
-}
-
-/**
- * Generalized fire-and-forget await supporting both dependency and time-based
- * readiness.
- */
-export function popcornAwaitTimed(
-    clientName: string,
-    targetDataset: string,
-    dependencyDatasets: string[],
-    options: AwaitOptions
-) {
-    run(clientName, targetDataset, dependencyDatasets, options).catch(
-        console.error
-    );
-}
-
-/**
- * Generalized async await supporting both dependency and time-based readiness.
- */
-export async function popcornAwaitTimedAsync(
-    clientName: string,
-    targetDataset: string,
-    dependencyDatasets: string[],
-    options: AwaitOptions
-) {
-    await run(clientName, targetDataset, dependencyDatasets, options);
 }
